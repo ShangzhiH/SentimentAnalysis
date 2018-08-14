@@ -96,18 +96,18 @@ class DatasetMaker(object):
                         format(mapfile_path, len(cls.char_to_id), len(cls.label_to_id)))
 
     @classmethod
-    def make_mapping_table_tensor(cls, name):
+    def make_mapping_table_tensor(cls):
         if not cls.mapping_dict_ready:
             tf.logging.error("Error: mapping dict isn't initialized!")
             sys.exit(0)
 
         char_mapping_tensor = tf.contrib.lookup.HashTable(
             tf.contrib.lookup.KeyValueTensorInitializer(cls.char_to_id.keys(), cls.char_to_id.values()),
-            cls.char_to_id.get(u"<UNK>"), name=name
+            cls.char_to_id.get(u"<UNK>")
         )
         label_mapping_tensor = tf.contrib.lookup.HashTable(
             tf.contrib.lookup.KeyValueTensorInitializer(cls.label_to_id.keys(), cls.label_to_id.values()),
-            0, name=name
+            0
         )
         tf.logging.info("Created mapping table tensor from exist mapping dict!")
         return char_mapping_tensor, label_mapping_tensor
