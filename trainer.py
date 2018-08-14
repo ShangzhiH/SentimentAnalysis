@@ -13,16 +13,18 @@ flags = tf.app.flags
 flags.DEFINE_boolean("is_sync", False, "Whether use sync strategy to update parameter")
 
 flags.DEFINE_float("lr", 0.001, "learning rate")
+flags.DEFINE_boolean("use_attention", True, "Whether to use attention mechanism")
+flags.DEFINE_float("l2_reg", 0.001, "l2 regularization value")
 flags.DEFINE_float("clip", 5.0, "gradient clipper value")
-flags.DEFINE_float("max_epoch", 1000, "the max number of epochs")
+flags.DEFINE_integer("max_epoch", 1000, "the max number of epochs")
 flags.DEFINE_integer("batch_size", 2, "batch size")
 flags.DEFINE_integer("check_step", 10, "Check loss every N steps")
 flags.DEFINE_integer("eval_step", 50, "Eval model every N steps")
 flags.DEFINE_string("root_path", "", "project root path")
 flags.DEFINE_string("log_dir", "log/", "log directory")
-flags.DEFINE_string("train_data", "data/example.train", "training data source")
-flags.DEFINE_string("valid_data", "data/example.valid", "validation data source")
-flags.DEFINE_string("test_data", "data/example.test", "test data source")
+flags.DEFINE_string("train_data", "data/validate.csv", "training data source")
+flags.DEFINE_string("valid_data", "data/validate.csv", "validation data source")
+flags.DEFINE_string("test_data", "data/validate.csv", "test data source")
 flags.DEFINE_integer("N_best_model", 10, "models of top N accuracy")
 
 flags.DEFINE_integer("char_dim", 100, "char embedding dimension")
@@ -117,7 +119,7 @@ class Trainer(object):
 
     @staticmethod
     def _create_session(graph):
-        session_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
+        session_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
         session_config.gpu_options.allow_growth = True
         session = tf.Session(config=session_config, graph=graph)
         return session
