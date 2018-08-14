@@ -96,7 +96,7 @@ class DatasetMaker(object):
                         format(mapfile_path, len(cls.char_to_id), len(cls.label_to_id)))
 
     @classmethod
-    def make_mapping_table_tensor(cls, name):
+    def make_mapping_table_tensor(cls, name="mappings"):
         if not cls.mapping_dict_ready:
             tf.logging.error("Error: mapping dict isn't initialized!")
             sys.exit(0)

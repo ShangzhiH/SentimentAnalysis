@@ -23,10 +23,32 @@ class BaseModel(object):
 
         self.dropout = dropout
         self.initializer = xavier_initializer()
+        self.use_attention = flags.use_attention
+        self.l2_reg = flags.l2_reg
 
         self.input_chars = input_chars
         real_char = tf.sign(self.input_chars)
         self.char_len = tf.reduce_sum(real_char, reduction_indices=1)
+        if self.use_attention:
+            self.weights = {
+                    "attention_Wm": tf.get_variable(name="attention_Wm",
+                                                    shape=[2 * self.rnn_dim, 1],
+                                                    initializer=self.initializer,
+                                                    regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
+                                                    ),
+
+                    "attention_Wr": tf.get_variable(name="attention_Wr",
+                                                    shape=[2 * self.rnn_dim, self.rnn_dim],
+                                                    initializer=self.initializer,
+                                                    regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
+                                                    ),
+
+                    "attention_Wn": tf.get_variable(name="attention_Wn",
+                                                    shape=[2 * self.rnn_dim, self.rnn_dim],
+                                                    initializer=self.initializer,
+                                                    regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
+                                                    )
+            }
 
     def build_graph(self):
         # embedding
@@ -35,9 +57,50 @@ class BaseModel(object):
         rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
         # concat final step output of biRNN
         final_rnn_output = self._pick_last_output(rnn_output)
-        # projection
-        logits = self._build_projection_layer(final_rnn_output, self.label_num)
+        logits = None
+        if self.use_attention:
+            h_att = self._apply_attention(rnn_output, self.char_len, final_rnn_output)
+            logits = self._build_projection_layer(h_att, self.label_num)
+        else:
+            # projection
+            logits = self._build_projection_layer(final_rnn_output, self.label_num)
         return logits
+
+    def _apply_attention(self, hiddens, length, h_n):
+        """
+        Args:
+            hiddens: rnn outputs, shape = [batch_size, max_len, 2 * rnn_dim]
+            length: real length of input sentences, shape = [batch_size]
+            h_n: output of the final rnn unit
+        Returns:
+            h_att: hidden representation to generate logits
+        """
+        max_len = tf.shape(hiddens)[1]
+        h_t = tf.reshape(hiddens, [-1, 2 * self.rnn_dim])
+        M = tf.reshape(tf.matmul(h_t, self.weights["attention_Wm"]), [-1, 1, max_len])
+        length = tf.reshape(length, [-1])
+        alpha = self._softmax_for_attention(M, length)
+        # attention_r shape = [batch_size, 2 * self.rnn_dim]
+        attention_r = tf.reshape(tf.matmul(alpha, hiddens), [-1, 2 * self.rnn_dim])
+        h_att = tf.nn.tanh(tf.matmul(attention_r, self.weights["attention_Wr"]) + tf.matmul(h_n, self.weights["attention_Wn"]))
+        return h_att
+
+
+    def _softmax_for_attention(self, inputs, length):
+        """
+        Args:
+            inputs: input to generate attention weight matrix, shape = [batch_size, 1, max_len]
+            length: real length of input sentences, shape = [batch_size]
+        Returns:
+            attention weight matrix, shape=[batch_size, 1, max_len]
+        """
+        max_len = tf.shape(inputs)[2]
+        max_axis = tf.reduce_max(inputs, 2, keep_dims=True)
+        inputs = tf.exp(inputs - max_axis)
+        mask = tf.reshape(tf.cast(tf.sequence_mask(length, max_len), tf.float32), tf.shape(inputs))
+        inputs *= mask
+        _sum = tf.reduce_sum(inputs, reduction_indices=2, keep_dims=True) + 1e-9
+        return inputs / _sum
 
     def _build_embedding_layer(self, inputs):
         with tf.variable_scope("char_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
@@ -125,14 +188,16 @@ class TrainModel(BaseModel):
         self.train_summary.append(tf.summary.scalar("training_loss", loss))
         return loss
 
-    @staticmethod
-    def _softmax_cross_entropy_loss(project_logits, labels):
+    def _softmax_cross_entropy_loss(self, project_logits, labels):
         with tf.variable_scope("softmax_cross_entropy_loss"):
             # use weights to mask loss of padding position
             log_likelihood = tf.losses.sparse_softmax_cross_entropy(
                 logits=project_logits, labels=labels
             )
             loss = tf.reduce_mean(log_likelihood)
+            if self.use_attention:
+                reg_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+                loss += sum(reg_loss)
         return loss
 
     def _optimizer(self, loss, global_step):
