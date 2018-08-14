@@ -57,7 +57,6 @@ class BaseModel(object):
         rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
         # concat final step output of biRNN
         final_rnn_output = self._pick_last_output(rnn_output)
-        logits = None
         if self.use_attention:
             h_att = self._apply_attention(rnn_output, self.char_len, final_rnn_output)
             logits = self._build_projection_layer(h_att, self.label_num)
@@ -85,8 +84,8 @@ class BaseModel(object):
         h_att = tf.nn.tanh(tf.matmul(attention_r, self.weights["attention_Wr"]) + tf.matmul(h_n, self.weights["attention_Wn"]))
         return h_att
 
-
-    def _softmax_for_attention(self, inputs, length):
+    @staticmethod
+    def _softmax_for_attention(inputs, length):
         """
         Args:
             inputs: input to generate attention weight matrix, shape = [batch_size, 1, max_len]

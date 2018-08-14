@@ -22,9 +22,9 @@ flags.DEFINE_integer("check_step", 10, "Check loss every N steps")
 flags.DEFINE_integer("eval_step", 50, "Eval model every N steps")
 flags.DEFINE_string("root_path", "", "project root path")
 flags.DEFINE_string("log_dir", "log/", "log directory")
-flags.DEFINE_string("train_data", "data/validate.csv", "training data source")
-flags.DEFINE_string("valid_data", "data/validate.csv", "validation data source")
-flags.DEFINE_string("test_data", "data/validate.csv", "test data source")
+flags.DEFINE_string("train_data", "data/example.train", "training data source")
+flags.DEFINE_string("valid_data", "data/example.valid", "validation data source")
+flags.DEFINE_string("test_data", "data/example.test", "test data source")
 flags.DEFINE_integer("N_best_model", 10, "models of top N accuracy")
 
 flags.DEFINE_integer("char_dim", 100, "char embedding dimension")
@@ -69,6 +69,7 @@ class Trainer(object):
         self.topN = FLAGS.N_best_model
         self.model_performance = dict.fromkeys(range(self.topN), 0.0)
         self.worst_valid_model_index = 0
+        self.best_valid_accuracy = 0.0
         self.best_test_accuracy = 0.0
 
     def _eval_performance(self, session, model, name, iter_init_op):
@@ -94,17 +95,18 @@ class Trainer(object):
                             .format(precision, recall, f1))
         if name == "validation":
             if accuracy > self.model_performance[self.worst_valid_model_index]:
-                tf.logging.info("New best validation accuracy: {:.2f}%".format(accuracy))
-                self.model_performance[self.worst_valid_model_index] = accuracy
                 model.eval_saver.save(session, os.path.join(self.log_dir, "model.ckpt"), self.worst_valid_model_index)
-                model.eval_saver.save(session, os.path.join(self.log_dir, "best_model.ckpt"))
                 tf.logging.info("Replacing model in {} by current model".format(
                     os.path.join(self.log_dir, "model.ckpt-") + str(self.worst_valid_model_index)))
-                tf.logging.info("Saving best model in {}".format(os.path.join(self.log_dir, "best_model.ckpt")))
+                self.model_performance[self.worst_valid_model_index] = accuracy
                 self.worst_valid_model_index = sorted(self.model_performance.items(), key=lambda d: d[1])[0][0]
+            if accuracy > self.best_valid_accuracy:
+                tf.logging.info("New best validation accuracy: {:.2f}%".format(100.0 * accuracy))
+                model.eval_saver.save(session, os.path.join(self.log_dir, "best_model.ckpt"))
+                tf.logging.info("Saving best model in {}".format(os.path.join(self.log_dir, "best_model.ckpt")))
         elif name == "test":
             if accuracy > self.best_test_accuracy:
-                tf.logging.info("New best test accuracy: {:.2f}".format(accuracy))
+                tf.logging.info("New best test accuracy: {:.2f}%".format(100.0 * accuracy))
         return accuracy
 
     def _init_dataset_maker(self, load=False):
