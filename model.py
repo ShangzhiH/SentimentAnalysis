@@ -162,11 +162,11 @@ class BaseModel(object):
 
 class TrainModel(BaseModel):
     def __init__(self, iterator, flags, global_step):
-        if isinstance(iterator, tf.data.Iterator):
-            chars, labels = iterator.get_next()
-        else:
-            chars, labels = iterator
-
+        # if isinstance(iterator, tf.data.Iterator):
+        #    chars, labels = iterator.get_next()
+        # else:
+        #    chars, labels = iterator
+        chars, labels = iterator.get_next()
         self.labels = labels
         super(TrainModel, self).__init__(chars, flags, flags.dropout)
         self.lr = flags.lr
@@ -215,29 +215,16 @@ class TrainModel(BaseModel):
 
 
 class EvalModel(BaseModel):
-    def __init__(self, iterator, flags, name):
+    def __init__(self, iterator, flags):
         flags.dropout = 1.0
-        # super(EvalModel).__init__(iterator, flags, None)
         self._make_eval_summary()
         chars, labels = iterator.get_next()
         self.labels = labels
 
-        TrainModel((chars, labels), flags, tf.train.get_or_create_global_step())
+        super(EvalModel, self).__init__(chars, flags, 1.0)
+        self.logits = self.build_graph()
 
-        with tf.variable_scope("eval_graph" if not name else name):
-            super(EvalModel, self).__init__(chars, flags, 1.0)
-            self.logits = self.build_graph()
-
-        train_variable_dict = {}
-        eval_variable_dict = {}
-        for var in tf.global_variables():
-            if u"eval_graph" in var.op.name:
-                name = var.op.name.replace(u"eval_graph/", u"")
-                eval_variable_dict[name] = var
-            else:
-                train_variable_dict[var.op.name] = var
-        self.saver = tf.train.Saver(var_list=train_variable_dict, sharded=True)
-        self.eval_saver = tf.train.Saver(var_list=eval_variable_dict, sharded=True)
+        self.saver = tf.train.Saver(var_list=tf.global_variables(), sharded=True)
 
     @staticmethod
     def _logits_to_label_ids(logits):

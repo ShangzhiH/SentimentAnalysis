@@ -95,17 +95,19 @@ class Trainer(object):
                             .format(precision, recall, f1))
         if name == "validation":
             if accuracy > self.model_performance[self.worst_valid_model_index]:
-                model.eval_saver.save(session, os.path.join(self.log_dir, "model.ckpt"), self.worst_valid_model_index)
+                model.saver.save(session, os.path.join(self.log_dir, "model.ckpt"), self.worst_valid_model_index)
                 tf.logging.info("Replacing model in {} by current model".format(
                     os.path.join(self.log_dir, "model.ckpt-") + str(self.worst_valid_model_index)))
                 self.model_performance[self.worst_valid_model_index] = accuracy
                 self.worst_valid_model_index = sorted(self.model_performance.items(), key=lambda d: d[1])[0][0]
             if accuracy > self.best_valid_accuracy:
+                self.best_valid_accuracy = accuracy
                 tf.logging.info("New best validation accuracy: {:.2f}%".format(100.0 * accuracy))
-                model.eval_saver.save(session, os.path.join(self.log_dir, "best_model.ckpt"))
+                model.saver.save(session, os.path.join(self.log_dir, "best_model.ckpt"))
                 tf.logging.info("Saving best model in {}".format(os.path.join(self.log_dir, "best_model.ckpt")))
         elif name == "test":
             if accuracy > self.best_test_accuracy:
+                self.best_test_accuracy = accuracy
                 tf.logging.info("New best test accuracy: {:.2f}%".format(100.0 * accuracy))
         return accuracy
 
@@ -151,7 +153,7 @@ class Trainer(object):
             eval_iter = tf.data.Iterator.from_structure(valid_dataset.output_types, valid_dataset.output_shapes)
             valid_init_op = eval_iter.make_initializer(valid_dataset)
             test_init_op = eval_iter.make_initializer(test_dataset)
-            eval_model = EvalModel(eval_iter, FLAGS, "eval_graph")
+            eval_model = EvalModel(eval_iter, FLAGS)
 
         train_session = self._create_session(train_graph)
         tf.logging.info("Created model with fresh parameters.")
@@ -187,7 +189,7 @@ class Trainer(object):
                     train_model.saver.save(train_session, os.path.join(self.log_dir, "temp_model.ckpt"))
                     tf.logging.info("Saving model parameters in {}".format(os.path.join(self.log_dir, "temp_model.ckpt")))
 
-                    eval_model.eval_saver.restore(eval_session, os.path.join(self.log_dir, "temp_model.ckpt"))
+                    eval_model.saver.restore(eval_session, os.path.join(self.log_dir, "temp_model.ckpt"))
                     tf.logging.info("Loading model from {}".format(os.path.join(self.log_dir, "temp_model.ckpt")))
                     validation_accuracy = self._eval_performance(eval_session, eval_model, "validation", valid_init_op)
                     test_accuracy = self._eval_performance(eval_session, eval_model, "test", test_init_op)

@@ -123,3 +123,13 @@ def export_model(sess, model, path, version, logger, id_to_tag, char_to_id):
     logger.info('Done exporting')
 
 
+class IteratorInitializerHook(tf.train.SessionRunHook):
+    def __init__(self, init_op):
+        super(IteratorInitializerHook, self).__init__()
+        self.init_op = init_op
+
+    def after_create_session(self, session, coord):
+        session.run(self.init_op)
+
+
+
