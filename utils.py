@@ -29,12 +29,15 @@ def save_flags(flags_to_save, path, wrapped=False):
         pickle.dump(flags_dict, f_w)
 
 
-def load_flags(path):
+def load_flags(path, FLAGS, wrapped=False):
     with tf.gfile.GFile(path, "rb") as f:
         flags_dict = pickle.load(f)
-        flags = tf.app.flags.FLAGS
+        flags = FLAGS
         for k, v in flags_dict.items():
-            flags.__dict__['__flags'][k] = v
+            if wrapped:
+                flags.__dict__['__wrapped'].__dict__['__flags'][k] = v
+            else:
+                flags.__dict__['__flags'][k] = v
     return flags
 
 
@@ -130,6 +133,11 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
 
     def after_create_session(self, session, coord):
         session.run(self.init_op)
+
+
+class LoggingCheckpointSaverListener(tf.train.CheckpointSaverListener):
+    def after_save(self, session, global_step_value):
+        tf.logging.info("Done writing checkpoint in step: {}".format(global_step_value))
 
 
 

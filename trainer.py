@@ -96,6 +96,7 @@ class Trainer(object):
         if name == "validation":
             if accuracy > self.model_performance[self.worst_valid_model_index]:
                 model.saver.save(session, os.path.join(self.log_dir, "model.ckpt"), self.worst_valid_model_index)
+                print(tf.train.latest_checkpoint(self.log_dir))
                 tf.logging.info("Replacing model in {} by current model".format(
                     os.path.join(self.log_dir, "model.ckpt-") + str(self.worst_valid_model_index)))
                 self.model_performance[self.worst_valid_model_index] = accuracy

@@ -178,7 +178,7 @@ class TrainModel(BaseModel):
         self.train_summary = []
         self.logits = self.build_graph()
         self.loss = self._build_loss_layer(self.logits, self.labels)
-        self.train_op = self._optimizer(self.loss, global_step)
+        self.train_op, self.optimizer = self._optimizer(self.loss, global_step)
         self.saver = tf.train.Saver(var_list=tf.global_variables(), sharded=True)
         self.merge_train_summary_op = tf.summary.merge(self.train_summary)
 
@@ -207,7 +207,7 @@ class TrainModel(BaseModel):
         grads_vars = optimizer.compute_gradients(loss)
         capped_grads_vars = [[tf.clip_by_value(g, -self.clip, self.clip), v] for g, v in grads_vars]
         train_op = optimizer.apply_gradients(capped_grads_vars, global_step)
-        return train_op
+        return train_op, optimizer
 
     def train(self, session):
         step, loss_value, _ = session.run([self.global_step, self.loss, self.train_op])
