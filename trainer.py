@@ -7,7 +7,7 @@ import numpy as np
 from model import TrainModel, EvalModel
 from model_dataset import DatasetMaker
 from data_utils import line_num_count
-from utils import print_flags, save_flags, load_flags
+from utils import print_flags, save_flags
 
 flags = tf.app.flags
 flags.DEFINE_boolean("is_sync", False, "Whether use sync strategy to update parameter")
@@ -96,7 +96,6 @@ class Trainer(object):
         if name == "validation":
             if accuracy > self.model_performance[self.worst_valid_model_index]:
                 model.saver.save(session, os.path.join(self.log_dir, "model.ckpt"), self.worst_valid_model_index)
-                print(tf.train.latest_checkpoint(self.log_dir))
                 tf.logging.info("Replacing model in {} by current model".format(
                     os.path.join(self.log_dir, "model.ckpt-") + str(self.worst_valid_model_index)))
                 self.model_performance[self.worst_valid_model_index] = accuracy
