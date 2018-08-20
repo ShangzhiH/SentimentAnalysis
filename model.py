@@ -104,7 +104,7 @@ class BaseModel(object):
     def _build_embedding_layer(self, inputs):
         with tf.variable_scope("char_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
             self.char_lookup = tf.get_variable(name="char_embedding_lookup_table", shape=[self.char_num, self.char_dim])
-        return tf.nn.embedding_lookup(self.char_lookup, inputs)
+        return tf.nn.dropout(tf.nn.embedding_lookup(self.char_lookup, inputs), keep_prob=self.dropout)
 
     def _create_rnn_cell(self, rnn_type, rnn_dim, rnn_layer):
         def _single_rnn_cell():
