@@ -1,5 +1,6 @@
 # encoding=utf-8
 import os
+import logging
 
 import tensorflow as tf
 import numpy as np
@@ -39,6 +40,7 @@ flags.DEFINE_integer("label_num", 0, "label num to decide during trainer initial
 
 FLAGS = flags.FLAGS
 tf.logging.set_verbosity(tf.logging.INFO)
+tf.logging._handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] <%(processName)s> (%(threadName)s) %(message)s"))
 
 
 class Trainer(object):
