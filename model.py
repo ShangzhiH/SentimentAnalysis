@@ -154,9 +154,16 @@ class BaseModel(object):
         return tf.concat([forward_output, backward_output], axis=1)
 
     def _build_projection_layer(self, inputs, output_dim):
-        with tf.variable_scope("projection_layer", reuse=tf.AUTO_REUSE):
-            projection_layer = tf.layers.Dense(units=output_dim, use_bias=False, kernel_initializer=self.initializer)
-            logits = projection_layer.apply(inputs)
+        with tf.variable_scope("projection_layer_1", reuse=tf.AUTO_REUSE):
+            activated_inputs = tf.nn.relu(inputs)
+            self.projection_layer_1 = tf.layers.Dense(units=self.rnn_dim, use_bias=False,
+                                                      activation=tf.nn.relu, kernel_initializer=self.initializer,
+                                                 name="projection_layer_1_dense")
+            projection_output_1 = self.projection_layer_1.apply(activated_inputs)
+        with tf.variable_scope("final_projection_layer", reuse=tf.AUTO_REUSE):
+            self.projection_layer_final = tf.layers.Dense(units=output_dim, use_bias=False, kernel_initializer=self.initializer,
+                                               name="final_projection_layer_dense")
+            logits = self.projection_layer_final.apply(projection_output_1)
         return logits
 
 
@@ -199,12 +206,30 @@ class TrainModel(BaseModel):
                 loss += sum(reg_loss)
         return loss
 
+    def _make_train_summary(self, grads_vars):
+        with tf.variable_scope("variable_gradient"):
+            for g, v in grads_vars:
+                if 'char_embedding_lookup_table' in v.name:
+                    gradients = tf.sqrt(tf.reduce_mean(g.values ** 2))
+                    self.train_summary.append(tf.summary.scalar("char_embedding_matrix_grad_norm", gradients))
+                elif 'projection_layer_1_dense' in v.name:
+                    gradients = tf.sqrt(tf.reduce_mean(g ** 2))
+                    self.train_summary.append(tf.summary.scalar("projection_layer_1_W_grad_norm", gradients))
+                elif 'final_projection_layer_dense' in v.name:
+                    gradients = tf.sqrt(tf.reduce_mean(g ** 2))
+                    self.train_summary.append(tf.summary.scalar("projection_layer_final_W_grad_norm", gradients))
+        with tf.variable_scope("variable_hist"):
+            self.train_summary.append(tf.summary.histogram("char_embedding_matrix_hist", tf.reshape(self.char_lookup, [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_1_w_hist", tf.reshape(self.projection_layer_1.weights, [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_final_w_hist", tf.reshape(self.projection_layer_final.weights, [-1])))
+
     def _optimizer(self, loss, global_step):
         optimizer = tf.train.AdamOptimizer(self.lr)
         if self.is_sync:
             optimizer = tf.train.SyncReplicasOptimizer(optimizer, replicas_to_aggregate=self.worker_num,
                                                        total_num_replicas=self.worker_num)
         grads_vars = optimizer.compute_gradients(loss)
+        self._make_train_summary(grads_vars)
         capped_grads_vars = [[tf.clip_by_value(g, -self.clip, self.clip), v] for g, v in grads_vars]
         train_op = optimizer.apply_gradients(capped_grads_vars, global_step)
         return train_op, optimizer

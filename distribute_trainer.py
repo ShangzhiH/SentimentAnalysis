@@ -27,10 +27,10 @@ flags.DEFINE_float("clip", 5.0, "gradient clipper value")
 flags.DEFINE_float("max_epoch", 1000, "the max number of epochs")
 flags.DEFINE_integer("batch_size", 32, "batch size")
 flags.DEFINE_integer("check_step", 100, "Check loss every N steps")
-flags.DEFINE_integer("eval_step", 1000, "Eval model every N steps")
+flags.DEFINE_integer("eval_sec", 150, "Eval model every N seconds")
 flags.DEFINE_string("root_path", "", "project root path")
 flags.DEFINE_string("log_dir", "log/", "log directory")
-flags.DEFINE_string("train_data", "data/train_ner", "training data source")
+flags.DEFINE_string("train_data", "data/train_ner", "training data absolute path")
 
 flags.DEFINE_integer("char_dim", 300, "char embedding dimension")
 flags.DEFINE_string("rnn_type", "LSTM", "rnn cell type")
@@ -85,10 +85,9 @@ class Trainer(object):
 
         self.global_step = 0
         self.check_step = FLAGS.check_step
-        self.eval_step = FLAGS.eval_step
+        self.eval_sec = FLAGS.eval_sec
         self.train_summary_op = None
         self.train_init_op = None
-        self.summary_writer = tf.summary.FileWriter(self.log_dir)
 
         self.session = None
         self.optimizer = None
@@ -115,10 +114,12 @@ class Trainer(object):
             hooks.append(IteratorInitializerHook(self.train_init_op))
             # print first worker's loss summary
             if self.task_index == 0:
-                hooks.append(tf.train.SummarySaverHook(save_steps=100, output_dir=self.log_dir, summary_op=self.train_summary_op))
+                hooks.append(tf.train.SummarySaverHook(save_steps=100, output_dir=self.log_dir,
+                                                       summary_op=self.train_summary_op))
         else:
             listener = LoggingCheckpointSaverListener()
-            hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=self.log_dir, save_steps=self.eval_step, listeners=[listener]))
+            hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=self.log_dir, save_secs=self.eval_sec,
+                                                      listeners=[listener]))
 
         if self.is_sync:
             hooks.append(self.optimizer.make_session_run_hook(self.is_chief))
@@ -164,14 +165,14 @@ class Trainer(object):
                 self.server.join()
                 return
 
-        self._init_dataset_maker(False)
+        self._init_dataset_maker(True)
 
         with tf.device(tf.train.replica_device_setter(worker_device=self.worker_prefix, cluster=self.cluster)):
             self.global_step = tf.train.get_or_create_global_step()
             char_mapping_tensor, label_mapping_tensor = DatasetMaker.make_mapping_table_tensor()
 
-            train_dataset = DatasetMaker.make_dataset(char_mapping_tensor, label_mapping_tensor, self.train_data, FLAGS.batch_size,
-                                                          "train", 1, 0)
+            train_dataset = DatasetMaker.make_dataset(char_mapping_tensor, label_mapping_tensor, self.train_data,
+                                                      FLAGS.batch_size, "train", 1, 0)
             tf.logging.info("The part {}/{} Training dataset is prepared!".format(1, 1))
             train_iter = tf.data.Iterator.from_structure(train_dataset.output_types, train_dataset.output_shapes)
             self.train_init_op = train_iter.make_initializer(train_dataset)
@@ -199,7 +200,7 @@ class Trainer(object):
                     tf.logging.info("Waiting for training...")
                     # record top N model's performance
                     while True:
-                        time.sleep(2)
+                        time.sleep(5)
                         global_step_val = sess.run(self.global_step)
                         tf.logging.info("Global step is {}".format(global_step_val))
             except tf.errors.OutOfRangeError as e:
@@ -211,9 +212,10 @@ class Trainer(object):
 
 def main(_):
     if FLAGS.job_name == "chief" and FLAGS.task_index == 0:
-        if tf.gfile.Exists(FLAGS.log_dir):
-            tf.gfile.DeleteRecursively(FLAGS.log_dir)
-        tf.gfile.MakeDirs(FLAGS.log_dir)
+        log_dir = os.path.join(FLAGS.root_path, FLAGS.log_dir)
+        if tf.gfile.Exists(log_dir):
+            tf.gfile.DeleteRecursively(log_dir)
+        tf.gfile.MakeDirs(log_dir)
     trainer = Trainer()
     try:
         trainer.train()
