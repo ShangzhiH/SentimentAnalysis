@@ -123,7 +123,9 @@ class DatasetMaker(object):
             dataset = tf.data.Dataset.from_generator(_generator_maker(file_path, False, False), (tf.string, tf.string),
                                                      (tf.TensorShape([None]), tf.TensorShape([])))
             dataset = dataset.shard(num_shards, worker_index)
-            dataset = dataset.shuffle(buffer_size=10000)
+
+            if task_type == "train":
+                dataset = dataset.shuffle(buffer_size=10000)
             dataset = dataset.map(lambda chars, label:
                                   (char_mapping_tensor.lookup(chars), label_mapping_tensor.lookup(label)))
             # train
