@@ -12,7 +12,7 @@ from model import EvalModel
 
 flags = tf.app.flags
 flags.DEFINE_string("root_path", "", "project root path")
-
+flags.DEFINE_integer("batch_size", 512, "batch size")
 flags.DEFINE_string("valid_data", "data/valid_ner", "validation data source")
 flags.DEFINE_string("test_data", "data/test_ner", "test data source")
 
@@ -108,9 +108,11 @@ class Eval(object):
         self._init_dataset_maker()
 
         eval_char_mapping_tensor, eval_label_mapping_tensor = DatasetMaker.make_mapping_table_tensor()
-        valid_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.valid_data, 512, "eval", 1, 0)
+        valid_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.valid_data,
+                                                  FLAGS.batch_size, "eval", 1, 0)
         tf.logging.info("The part 1/1 Validation dataset is prepared!")
-        test_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.test_data, 512, "eval", 1, 0)
+        test_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.test_data,
+                                                 FLAGS.batch_size, "eval", 1, 0)
         tf.logging.info("The part 1/1 Test dataset is prepared!")
 
         eval_iter = tf.data.Iterator.from_structure(valid_dataset.output_types, valid_dataset.output_shapes)

@@ -54,11 +54,11 @@ class BaseModel(object):
         # embedding
         input_embedding = self._build_embedding_layer(self.input_chars)
         # rnn
-        rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
+        self.rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
         # concat final step output of biRNN
-        final_rnn_output = self._pick_last_output(rnn_output)
+        final_rnn_output = self._pick_last_output(self.rnn_output)
         if self.use_attention:
-            h_att = self._apply_attention(rnn_output, self.char_len, final_rnn_output)
+            h_att = self._apply_attention(self.rnn_output, self.char_len, final_rnn_output)
             logits = self._build_projection_layer(h_att, self.label_num)
         else:
             # projection
@@ -156,25 +156,20 @@ class BaseModel(object):
     def _build_projection_layer(self, inputs, output_dim):
         with tf.variable_scope("projection_layer_1", reuse=tf.AUTO_REUSE):
             activated_inputs = tf.nn.relu(inputs)
-            self.projection_layer_1 = tf.layers.Dense(units=self.rnn_dim, use_bias=False,
+            self.projection_layer_1 = tf.layers.Dense(units=self.rnn_dim, use_bias=True,
                                                       activation=tf.nn.relu, kernel_initializer=self.initializer,
                                                  name="projection_layer_1_dense")
-            projection_output_1 = self.projection_layer_1.apply(activated_inputs)
+            self.projection_output_1 = self.projection_layer_1.apply(activated_inputs)
         with tf.variable_scope("final_projection_layer", reuse=tf.AUTO_REUSE):
             self.projection_layer_final = tf.layers.Dense(units=output_dim, use_bias=False, kernel_initializer=self.initializer,
                                                name="final_projection_layer_dense")
-            logits = self.projection_layer_final.apply(projection_output_1)
+            logits = self.projection_layer_final.apply(self.projection_output_1)
         return logits
 
 
 class TrainModel(BaseModel):
     def __init__(self, iterator, flags, global_step):
-        # if isinstance(iterator, tf.data.Iterator):
-        #    chars, labels = iterator.get_next()
-        # else:
-        #    chars, labels = iterator
         chars, labels = iterator.get_next()
-        self.labels = labels
         super(TrainModel, self).__init__(chars, flags, flags.dropout)
         self.lr = flags.lr
         self.clip = flags.clip
@@ -184,7 +179,7 @@ class TrainModel(BaseModel):
 
         self.train_summary = []
         self.logits = self.build_graph()
-        self.loss = self._build_loss_layer(self.logits, self.labels)
+        self.loss = self._build_loss_layer(self.logits, labels)
         self.train_op, self.optimizer = self._optimizer(self.loss, global_step)
         self.saver = tf.train.Saver(var_list=tf.global_variables(), sharded=True)
         self.merge_train_summary_op = tf.summary.merge(self.train_summary)
@@ -207,21 +202,45 @@ class TrainModel(BaseModel):
         return loss
 
     def _make_train_summary(self, grads_vars):
+        # visualize gradient
         with tf.variable_scope("variable_gradient"):
             for g, v in grads_vars:
                 if 'char_embedding_lookup_table' in v.name:
                     gradients = tf.sqrt(tf.reduce_mean(g.values ** 2))
                     self.train_summary.append(tf.summary.scalar("char_embedding_matrix_grad_norm", gradients))
                 elif 'projection_layer_1_dense' in v.name:
-                    gradients = tf.sqrt(tf.reduce_mean(g ** 2))
-                    self.train_summary.append(tf.summary.scalar("projection_layer_1_W_grad_norm", gradients))
+                    if "MatMul" in v.name:
+                        gradients = tf.sqrt(tf.reduce_mean(g ** 2))
+                        self.train_summary.append(tf.summary.scalar("projection_layer_1_W_grad_norm", gradients))
+                    elif "BiasAdd" in v.name:
+                        gradients = tf.norm(g)
+                        self.train_summary.append(tf.summary.scalar("projection_layer_1_b_grad_norm", gradients))
                 elif 'final_projection_layer_dense' in v.name:
                     gradients = tf.sqrt(tf.reduce_mean(g ** 2))
                     self.train_summary.append(tf.summary.scalar("projection_layer_final_W_grad_norm", gradients))
+        # viszalize weight
         with tf.variable_scope("variable_hist"):
             self.train_summary.append(tf.summary.histogram("char_embedding_matrix_hist", tf.reshape(self.char_lookup, [-1])))
-            self.train_summary.append(tf.summary.histogram("projection_layer_1_w_hist", tf.reshape(self.projection_layer_1.weights, [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_1_w_hist", tf.reshape(self.projection_layer_1.weights[0], [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_1_b_hist", tf.reshape(self.projection_layer_1.weights[1], [-1])))
             self.train_summary.append(tf.summary.histogram("projection_layer_final_w_hist", tf.reshape(self.projection_layer_final.weights, [-1])))
+        # visualize rnn output
+        with tf.variable_scope("sample_rnn_output_different_step"):
+            self.train_summary.append(tf.summary.histogram("sample_1_rnn_output", tf.norm(self.rnn_output[0], axis=1)))
+            self.train_summary.append(tf.summary.histogram("sample_2_rnn_output", tf.norm(self.rnn_output[1], axis=1)))
+            self.train_summary.append(tf.summary.histogram("sample_3_rnn_output", tf.norm(self.rnn_output[2], axis=1)))
+            self.train_summary.append(tf.summary.histogram("sample_4_rnn_output", tf.norm(self.rnn_output[3], axis=1)))
+        # visualize projection output
+        with tf.variable_scope("sample_projection_1_output"):
+            self.train_summary.append(tf.summary.histogram("sample_1_projection_1_output", self.projection_output_1[0]))
+            self.train_summary.append(tf.summary.histogram("sample_2_projection_1_output", self.projection_output_1[1]))
+            self.train_summary.append(tf.summary.histogram("sample_3_projection_1_output", self.projection_output_1[2]))
+            self.train_summary.append(tf.summary.histogram("sample_4_projection_1_output", self.projection_output_1[3]))
+        with tf.variable_scope("sample_projection_final_output"):
+            self.train_summary.append(tf.summary.histogram("sample_1_projection_final_output", self.logits[0]))
+            self.train_summary.append(tf.summary.histogram("sample_2_projection_final_output", self.logits[1]))
+            self.train_summary.append(tf.summary.histogram("sample_3_projection_final_output", self.logits[2]))
+            self.train_summary.append(tf.summary.histogram("sample_4_projection_final_output", self.logits[3]))
 
     def _optimizer(self, loss, global_step):
         optimizer = tf.train.AdamOptimizer(self.lr)
@@ -230,7 +249,7 @@ class TrainModel(BaseModel):
                                                        total_num_replicas=self.worker_num)
         grads_vars = optimizer.compute_gradients(loss)
         self._make_train_summary(grads_vars)
-        capped_grads_vars = [[tf.clip_by_value(g, -self.clip, self.clip), v] for g, v in grads_vars]
+        capped_grads_vars = [[tf.clip_by_norm(g, self.clip), v] for g, v in grads_vars]
         train_op = optimizer.apply_gradients(capped_grads_vars, global_step)
         return train_op, optimizer
 
@@ -241,10 +260,8 @@ class TrainModel(BaseModel):
 
 class EvalModel(BaseModel):
     def __init__(self, iterator, flags):
-        flags.dropout = 1.0
         self._make_eval_summary()
-        chars, labels = iterator.get_next()
-        self.labels = labels
+        chars, self.labels = iterator.get_next()
 
         super(EvalModel, self).__init__(chars, flags, 1.0)
         self.logits = self.build_graph()
@@ -285,7 +302,29 @@ class EvalModel(BaseModel):
         summary_writer.add_summary(merged_summary, step)
 
 
+class InferModel(BaseModel):
+    def __init__(self, iterator, flags):
+        # id to record data while inference
+        self.ids, chars = iterator.get_next()
 
+        super(InferModel, self).__init__(chars, flags, 1.0)
+        self.logits = self.build_graph()
+
+    @staticmethod
+    def _logits_to_label_ids(logits):
+        predict_label_ids = np.argmax(logits, axis=1)
+        return predict_label_ids
+
+    def infer(self, session, file_handler):
+        try:
+            while True:
+                data_ids, logits = session.run([self.ids, self.logits])
+                predict_label_ids = self._logits_to_label_ids(logits)
+
+                predict_labels = DatasetMaker.label_ids_to_labels(predict_label_ids)
+                file_handler.write(np.concatenate([data_ids, predict_labels], axis=1))
+        except tf.errors.OutOfRangeError as e:
+            raise e
 
 
 

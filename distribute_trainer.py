@@ -20,7 +20,7 @@ flags.DEFINE_string("job_name", "", "One of 'ps', 'worker' or 'chief'")
 flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 flags.DEFINE_boolean("is_sync", True, "Whether use sync strategy to update parameter")
 
-flags.DEFINE_float("lr", 0.001, "learning rate")
+flags.DEFINE_float("lr", 0.1, "learning rate")
 flags.DEFINE_boolean("use_attention", False, "Whether to use attention mechanism")
 flags.DEFINE_float("l2_reg", 0.001, "l2 regularization value")
 flags.DEFINE_float("clip", 5.0, "gradient clipper value")
@@ -114,7 +114,7 @@ class Trainer(object):
             hooks.append(IteratorInitializerHook(self.train_init_op))
             # print first worker's loss summary
             if self.task_index == 0:
-                hooks.append(tf.train.SummarySaverHook(save_steps=100, output_dir=self.log_dir,
+                hooks.append(tf.train.SummarySaverHook(save_steps=10, output_dir=self.log_dir,
                                                        summary_op=self.train_summary_op))
         else:
             listener = LoggingCheckpointSaverListener()
