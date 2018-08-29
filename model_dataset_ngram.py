@@ -10,20 +10,18 @@ __all__ = ["DatasetMaker"]
 
 
 # full_to_half, replace_html.etc operations were done during preprocessing process to avoid redundant calculation
-def _generator_maker(file_path, infer=False, return_unicode=True):
+def _generator_maker(file_path, ngram=2, infer=False, return_unicode=True):
     """
     :rtype: generator
     """
     def _generator():
-        for line in unicode_open(file_path):
+        for line in unicode_open(file_path, ngram = []):
             tokens = line.strip().split("\t")
             if not infer:
                 if len(tokens) != 2:
                     continue
                 sentence, label = tokens
                 chars = list(sentence.strip().replace(u"\\\\r\\\\n", u"\n").replace(u"\\\\n", u"\n"))
-
-
                 # 这里有个迷之bug, dataset.from_generator里的generator返回了unicode类型的话会报错
                 # 因为指定类型是str的, 但是tensorflow的type又没有dtype=tf.UNICODE
                 # 但是之前几个项目同样的做法又没有问题，纠结了3个小时候后我决定放弃，硬转成str吧，虽然如果打印会发现str表示中文是有问题的
@@ -31,7 +29,13 @@ def _generator_maker(file_path, infer=False, return_unicode=True):
                 # ps: 升级tensorflow版本听说可以解决，但是早日摆脱python2才是正道
                 if not return_unicode:
                     chars = [char.encode("utf-8") for char in chars]
-                yield chars, label
+
+                if ngram == 2:
+                    grams = [i+j for i, j in zip(chars, chars[1:])]
+                elif ngram == 3:
+                    grams = [i+j for i, j in zip(chars, chars[1:])]
+                    grams += [i + j + k for i, j, k in zip(chars, chars[1:], chars[2:])]
+                yield chars, grams, label
             else:
                 if len(tokens) != 1:
                     continue

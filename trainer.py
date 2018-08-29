@@ -59,7 +59,7 @@ class Trainer(object):
         self.test_data_num = line_num_count(self.test_data)
         tf.logging.info("{} / {} / {} sentences in train /dev / test".format(self.train_data_num, self.valid_data_num, self.test_data_num))
 
-        self.map_file = os.path.join(self.root_path, "map.pkl")
+        self.map_file = "data/attention_after_bidirectional_lstm_model_fine_tuned_comment_data_word_pos_dict.pkl"# os.path.join(self.root_path, "map.pkl")
         self.vocabulary_file = os.path.join(self.root_path, "vocabulary.csv")
 
         self.global_step = 0

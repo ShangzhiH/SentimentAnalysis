@@ -95,10 +95,12 @@ class Trainer(object):
     def _init_dataset_maker(self, load=False):
         if not load:
             DatasetMaker.generate_mapping(self.train_data)
-            DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
+            if self.is_chief:
+                DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
         else:
             DatasetMaker.load_mapping(self.map_file)
-            DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
+            if self.is_chief:
+                DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
         FLAGS.char_num = len(DatasetMaker.char_to_id)
         FLAGS.label_num = len(DatasetMaker.label_to_id)
 
@@ -164,7 +166,8 @@ class Trainer(object):
             with tf.device("/cpu:0"):
                 self.server.join()
                 return
-
+        if not self.is_chief:
+            time.sleep(20)
         self._init_dataset_maker(True)
 
         with tf.device(tf.train.replica_device_setter(worker_device=self.worker_prefix, cluster=self.cluster)):

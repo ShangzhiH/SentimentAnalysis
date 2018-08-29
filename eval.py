@@ -109,10 +109,10 @@ class Eval(object):
 
         eval_char_mapping_tensor, eval_label_mapping_tensor = DatasetMaker.make_mapping_table_tensor()
         valid_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.valid_data,
-                                                  FLAGS.batch_size, "eval", 1, 0)
+                                                  512, "eval", 1, 0)
         tf.logging.info("The part 1/1 Validation dataset is prepared!")
         test_dataset = DatasetMaker.make_dataset(eval_char_mapping_tensor, eval_label_mapping_tensor, self.test_data,
-                                                 FLAGS.batch_size, "eval", 1, 0)
+                                                 512, "eval", 1, 0)
         tf.logging.info("The part 1/1 Test dataset is prepared!")
 
         eval_iter = tf.data.Iterator.from_structure(valid_dataset.output_types, valid_dataset.output_shapes)
@@ -148,8 +148,13 @@ class Eval(object):
 
 def main(_):
     evaler = Eval()
-    if not tf.gfile.Exists(evaler.log_dir):
-        tf.logging.error("Log directory doesn't exist!")
+    while True:
+        if not tf.gfile.Exists(evaler.log_dir):
+            tf.logging.error("Log directory doesn't exist!")
+            time.sleep(10)
+        else:
+            break
+
     if not tf.gfile.Exists(evaler.best_model_dir):
         tf.gfile.MakeDirs(evaler.best_model_dir)
     if not tf.gfile.Exists(evaler.summary_dir):

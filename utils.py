@@ -7,7 +7,8 @@ import os
 import pickle
 
 import tensorflow as tf
-
+from keras.models import load_model
+from keras import backend as k
 
 def print_flags(flags_to_print, wrapped=False):
     if wrapped:
@@ -126,6 +127,38 @@ def export_model(sess, model, path, version, logger, id_to_tag, char_to_id):
     logger.info('Done exporting')
 
 
+def convert_from_keras_to_tensorflow(model_path, export_path):
+    model_keras = load_model(model_path)
+    tf.logging.info(model_keras.summary())
+    with k.get_session() as sess:
+        legacy_init_op = tf.group(tf.tables_initializer(), name='legacy_init_op')
+        builder = tf.saved_model.builder.SavedModelBuilder(export_path)
+        signature_inputs = {
+            tf.saved_model.signature_constants.PREDICT_INPUTS: tf.saved_model.utils.build_tensor_info(model_keras.input)
+        }
+
+        signature_outputs = {
+            tf.saved_model.signature_constants.PREDICT_OUTPUTS: tf.saved_model.utils.build_tensor_info(model_keras.output)
+        }
+
+        predict_signature_def = tf.saved_model.signature_def_utils.build_signature_def(
+            inputs=signature_inputs,
+            outputs=signature_outputs,
+            method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME
+        )
+
+        builder.add_meta_graph_and_variables(
+            sess,
+            ["sentiment-analysis"],
+            signature_def_map={
+                'model': predict_signature_def
+            },
+            legacy_init_op=legacy_init_op,
+        )
+
+        builder.save()
+
+
 class IteratorInitializerHook(tf.train.SessionRunHook):
     def __init__(self, init_op):
         super(IteratorInitializerHook, self).__init__()
@@ -138,6 +171,7 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
 class LoggingCheckpointSaverListener(tf.train.CheckpointSaverListener):
     def after_save(self, session, global_step_value):
         tf.logging.info("Done writing checkpoint in step: {}".format(global_step_value))
+
 
 
 
