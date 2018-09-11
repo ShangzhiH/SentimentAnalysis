@@ -31,14 +31,14 @@ def _generator_maker(file_path, infer=False, return_unicode=True):
                 # ps: 升级tensorflow版本听说可以解决，但是早日摆脱python2才是正道
                 if not return_unicode:
                     chars = [char.encode("utf-8") for char in chars]
-                yield chars, label
+                yield chars[0:200], label
             else:
                 if len(tokens) != 1:
                     continue
-                chars = list(tokens[0].strip().replace("\\\\r\\\\n", "\n").replace("\\\\n", "\n"))
+                chars = tokens[0].strip().replace("\\\\r\\\\n", "\n").replace("\\\\n", "\n").split(" ")
                 if not return_unicode:
                     chars = [char.encode("utf-8") for char in chars]
-                yield chars
+                yield chars[0:200]
     return _generator
 
 
@@ -93,7 +93,7 @@ class DatasetMaker(object):
     @classmethod
     def load_mapping(cls, mapfile_path):
         with tf.gfile.GFile(mapfile_path, "rb") as f:
-            cls.char_to_id, cls.id_to_char, cls.label_to_id, cls.id_to_label = pickle.load(f)
+            cls.char_to_id, cls.id_to_char = pickle.load(f)
 
         cls.mapping_dict_ready = True
         tf.logging.info("Loaded mapping dictionary from file {} with {} different chars and {} different labels!".
@@ -107,7 +107,7 @@ class DatasetMaker(object):
 
         char_mapping_tensor = tf.contrib.lookup.HashTable(
             tf.contrib.lookup.KeyValueTensorInitializer(list(cls.char_to_id.keys()), list(cls.char_to_id.values()), tf.string, tf.int32),
-            cls.char_to_id.get("<UNK>"), name=name
+            0, name=name
         )
         label_mapping_tensor = tf.contrib.lookup.HashTable(
             tf.contrib.lookup.KeyValueTensorInitializer(list(cls.label_to_id.keys()), list(cls.label_to_id.values()), tf.string, tf.int32),
@@ -121,8 +121,8 @@ class DatasetMaker(object):
         if task_type == "infer":
             dataset = tf.data.Dataset.from_generator(_generator_maker(file_path, True, False), tf.string, tf.TensorShape([None]))
             dataset = dataset.shard(num_shards, worker_index)
-            dataset = dataset.map(lambda chars: (char_mapping_tensor.lookup(chars)), num_parallel_calls=8)
-            dataset = dataset.padded_batch(batch_size, padded_shapes=tf.TensorShape([None]))
+            dataset = dataset.map(lambda chars: (char_mapping_tensor.lookup(chars[::-1])), num_parallel_calls=8)
+            dataset = dataset.padded_batch(batch_size, padded_shapes=tf.TensorShape([200]))
         else:
             dataset = tf.data.Dataset.from_generator(_generator_maker(file_path, False, False), (tf.string, tf.string),
                                                      (tf.TensorShape([None]), tf.TensorShape([])))
@@ -134,11 +134,11 @@ class DatasetMaker(object):
                                   (char_mapping_tensor.lookup(chars), label_mapping_tensor.lookup(label)), num_parallel_calls=8)
             # train
             if task_type == "train":
-                dataset = dataset.padded_batch(batch_size, padded_shapes=(tf.TensorShape([None]),
+                dataset = dataset.padded_batch(batch_size, padded_shapes=(tf.TensorShape([200]),
                                                                           tf.TensorShape([]))).repeat()
             # eval
             elif task_type == "eval":
-                dataset = dataset.padded_batch(batch_size, padded_shapes=(tf.TensorShape([None]),
+                dataset = dataset.padded_batch(batch_size, padded_shapes=(tf.TensorShape([200]),
                                                                           tf.TensorShape([])))
         return dataset
 

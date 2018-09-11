@@ -29,9 +29,11 @@ def _generator_maker(file_path, infer=False, return_unicode=True):
                 # ps: 升级tensorflow版本听说可以解决，但是早日摆脱python2才是正道
                 if not return_unicode:
                     chars = [char.encode("utf-8") for char in chars]
-
-                grams2 = [i + j for i, j in zip(chars, chars[1:])]
-                grams3 = [i + j + k for i, j, k in zip(chars, chars[1:], chars[2:])]
+                grams2 = []
+                grams3 = []
+                for i, j, k in zip(chars, chars[1:], chars[2:]):
+                    grams2.append(i + j)
+                    grams3.append(i + j + k)
                 yield chars, grams2, grams3, label
             else:
                 if len(tokens) != 1:
@@ -39,9 +41,11 @@ def _generator_maker(file_path, infer=False, return_unicode=True):
                 chars = list(tokens[0].strip().replace("\\\\r\\\\n", "\n").replace("\\\\n", "\n"))
                 if not return_unicode:
                     chars = [char.encode("utf-8") for char in chars]
-
-                grams2 = [i + j for i, j in zip(chars, chars[1:])]
-                grams3 += [i + j + k for i, j, k in zip(chars, chars[1:], chars[2:])]
+                grams2 = []
+                grams3 = []
+                for i, j, k in zip(chars, chars[1:], chars[2:]):
+                    grams2.append(i + j)
+                    grams3.append(i + j + k)
                 yield chars, grams2, grams3
     return _generator
 
@@ -73,12 +77,10 @@ class DatasetMaker(object):
         gram2_freq = {}
         gram3_freq = {}
         for char_list, gram2_list, gram3_list, label in _generator_maker(file_path)():
-            for char in char_list:
+            for char, gram2, gram3 in zip(char_list, gram2_list, gram3_list):
                 char_freq[char] = char_freq.get(char, 0) + 1
-            for gram in gram2_list:
-                gram2_freq[gram] = gram2_freq.get(gram, 0) + 1
-            for gram in gram3_list:
-                gram3_freq[gram] = gram3_freq.get(gram, 0) + 1
+                gram2_freq[gram2] = gram2_freq.get(gram2, 0) + 1
+                gram3_freq[gram3] = gram3_freq.get(gram3, 0) + 1
 
             cls.label_to_id[label] = cls.label_to_id.get(label, len(cls.label_to_id))
             cls.id_to_label[cls.label_to_id[label]] = label
@@ -117,7 +119,7 @@ class DatasetMaker(object):
                          cls.gram3_to_id, cls.id_to_gram3, cls.label_to_id, cls.id_to_label], f_w)
         tf.logging.info("Saved mapping dictionary in file {}".format(mapfile_path))
         with tf.gfile.GFile(vocabfile_path, "w") as f:
-            f.write(u"\n".join(cls.char_to_id.keys()))
+            f.write(u"\n".join(cls.char_to_id.keys() + cls.gram2_to_id.keys() + cls.gram3_to_id.keys()))
         tf.logging.info("Saved readable vocabulary in file {}".format(vocabfile_path))
 
     @classmethod

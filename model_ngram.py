@@ -5,16 +5,18 @@ import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 from tensorflow.contrib.rnn import LSTMCell, GRUCell, DropoutWrapper, MultiRNNCell
 
-from model_dataset import DatasetMaker
+from model_dataset_ngram import DatasetMaker
 from eval_utils import metric_collect
 
 __all__ = ["TrainModel", "EvalModel", "InferModel"]
 
 
 class BaseModel(object):
-    def __init__(self, input_chars, flags, dropout):
+    def __init__(self, input_chars, input_2grams, input_3grams, flags, dropout):
         self.char_dim = flags.char_dim
         self.char_num = flags.char_num
+        self.gram2_num = flags.gram2_num
+        self.gram3_num = flags.gram3_num
         self.label_num = flags.label_num
 
         self.rnn_type = flags.rnn_type
@@ -27,24 +29,28 @@ class BaseModel(object):
         self.l2_reg = flags.l2_reg
 
         self.input_chars = input_chars
+        self.input_2grams = input_2grams
+        self.input_3grams = input_3grams
         real_char = tf.sign(self.input_chars)
         self.char_len = tf.reduce_sum(real_char, reduction_indices=1)
+        self.gram2_len = self.char_len - 1
+        self.gram3_len = self.char_len - 2
         if self.use_attention:
             self.weights = {
                     "attention_Wm": tf.get_variable(name="attention_Wm",
-                                                    shape=[2 * self.rnn_dim, 1],
+                                                    shape=[6 * self.rnn_dim, 1],
                                                     initializer=self.initializer,
                                                     regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
                                                     ),
 
                     "attention_Wr": tf.get_variable(name="attention_Wr",
-                                                    shape=[2 * self.rnn_dim, self.rnn_dim],
+                                                    shape=[6 * self.rnn_dim, self.rnn_dim],
                                                     initializer=self.initializer,
                                                     regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
                                                     ),
 
                     "attention_Wn": tf.get_variable(name="attention_Wn",
-                                                    shape=[2 * self.rnn_dim, self.rnn_dim],
+                                                    shape=[6 * self.rnn_dim, self.rnn_dim],
                                                     initializer=self.initializer,
                                                     regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg)
                                                     )
@@ -54,35 +60,24 @@ class BaseModel(object):
         # embedding
         input_embedding = self._build_embedding_layer(self.input_chars)
         # rnn
-        self.rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
-        # concat final step output of biRNN
-        final_rnn_output = self._pick_last_output(self.rnn_output)
-        if self.use_attention:
-            h_att = self._apply_attention(self.rnn_output, self.char_len, final_rnn_output)
-            logits = self._build_projection_layer(h_att, self.label_num)
-        else:
-            # projection
-            logits = self._build_projection_layer(final_rnn_output, self.label_num)
-        return logits
+        self.rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len, name="Char")
+        # 2gram embedding
+        gram2_embedding = self._build_gram2_embedding_layer(self.input_2grams)
+        self.rnn_output_gram2 = self._build_multilayer_rnn(gram2_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.gram2_len, name="Gram2")
+        # 3gram embedding
+        gram3_embedding = self._build_gram3_embedding_layer(self.input_3grams)
+        self.rnn_output_gram3 = self._build_multilayer_rnn(gram3_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.gram3_len, name="Gram3")
 
-    def _apply_attention(self, hiddens, length, h_n):
-        """
-        Args:
-            hiddens: rnn outputs, shape = [batch_size, max_len, 2 * rnn_dim]
-            length: real length of input sentences, shape = [batch_size]
-            h_n: output of the final rnn unit
-        Returns:
-            h_att: hidden representation to generate logits
-        """
-        max_len = tf.shape(hiddens)[1]
-        h_t = tf.reshape(hiddens, [-1, 2 * self.rnn_dim])
-        M = tf.reshape(tf.matmul(h_t, self.weights["attention_Wm"]), [-1, 1, max_len])
-        length = tf.reshape(length, [-1])
-        alpha = self._softmax_for_attention(M, length)
-        # attention_r shape = [batch_size, 2 * self.rnn_dim]
-        attention_r = tf.reshape(tf.matmul(alpha, hiddens), [-1, 2 * self.rnn_dim])
-        h_att = tf.nn.tanh(tf.matmul(attention_r, self.weights["attention_Wr"]) + tf.matmul(h_n, self.weights["attention_Wn"]))
-        return h_att
+        # concat final step output of biRNN
+        final_rnn_output_char = self._pick_last_output(self.rnn_output, length=self.char_len)
+        final_rnn_output_gram2 = self._pick_last_output(self.rnn_output_gram2, length=self.gram2_len)
+        final_rnn_output_gram3 = self._pick_last_output(self.rnn_output_gram3, length=self.gram3_len)
+        final_rnn_output = tf.concat([final_rnn_output_char, final_rnn_output_gram2, final_rnn_output_gram3], axis=1)
+
+
+        # projection
+        logits = self._build_projection_layer(final_rnn_output, self.label_num)
+        return logits
 
     @staticmethod
     def _softmax_for_attention(inputs, length):
@@ -103,8 +98,19 @@ class BaseModel(object):
 
     def _build_embedding_layer(self, inputs):
         with tf.variable_scope("char_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
-            self.char_lookup = tf.get_variable(name="char_embedding_lookup_table", shape=[self.char_num, self.char_dim])
+            self.char_lookup = tf.get_variable(name="char_embedding_lookup_table", shape=[self.char_num, self.char_dim], partitioner=tf.fixed_size_partitioner(6))
         return tf.nn.dropout(tf.nn.embedding_lookup(self.char_lookup, inputs), keep_prob=self.dropout)
+
+    def _build_gram2_embedding_layer(self, inputs):
+        with tf.variable_scope("gram2_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
+            self.gram2_lookup = tf.get_variable(name="gram2_embedding_lookup_table", shape=[self.gram2_num, self.char_dim], partitioner=tf.fixed_size_partitioner(6))
+        return tf.nn.dropout(tf.nn.embedding_lookup(self.gram2_lookup, inputs), keep_prob=self.dropout)
+
+    def _build_gram3_embedding_layer(self, inputs):
+        with tf.variable_scope("gram3_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
+            self.gram3_lookup = tf.get_variable(name="gram3_embedding_lookup_table", shape=[self.gram3_num, self.char_dim], partitioner=tf.fixed_size_partitioner(6))
+        return tf.nn.dropout(tf.nn.embedding_lookup(self.gram3_lookup, inputs), keep_prob=self.dropout)
+
 
     def _create_rnn_cell(self, rnn_type, rnn_dim, rnn_layer):
         def _single_rnn_cell():
@@ -127,10 +133,10 @@ class BaseModel(object):
                                                      sequence_length=lengths)
         return tf.concat(outputs, axis=2)
 
-    def _build_multilayer_rnn(self, rnn_input, rnn_type, rnn_dim, rnn_layer, lengths):
+    def _build_multilayer_rnn(self, rnn_input, rnn_type, rnn_dim, rnn_layer, lengths, name=""):
         inputs = rnn_input
         for i in range(rnn_layer):
-            with tf.variable_scope("Bi{}_Sequence_Layer_{}".format(rnn_type, i+1), reuse=tf.AUTO_REUSE):
+            with tf.variable_scope("{}_Bi{}_Sequence_Layer_{}".format(name, rnn_type, i+1), reuse=tf.AUTO_REUSE):
                 inputs = self._build_birnn_layer(inputs, rnn_type, rnn_dim, lengths)
         return inputs
 
@@ -147,8 +153,8 @@ class BaseModel(object):
         res = tf.gather_nd(data, indices)
         return res
 
-    def _pick_last_output(self, rnn_output):
-        forward_output = self._extract_axis_1(rnn_output, self.char_len - 1)[:, :self.rnn_dim]
+    def _pick_last_output(self, rnn_output, length):
+        forward_output = self._extract_axis_1(rnn_output, length - 1)[:, :self.rnn_dim]
         backward_output = rnn_output[:, 0, self.rnn_dim:]
         assert forward_output.get_shape()[-1] == backward_output.get_shape()[-1]
         return tf.concat([forward_output, backward_output], axis=1)
@@ -157,14 +163,14 @@ class BaseModel(object):
         with tf.variable_scope("projection_layer_1", reuse=tf.AUTO_REUSE):
             activated_inputs = tf.nn.selu(inputs)
             activated_bn_inputs = tf.layers.batch_normalization(activated_inputs)
-            self.projection_layer_1 = tf.layers.Dense(units=self.rnn_dim, use_bias=True,
+            self.projection_layer_1 = tf.layers.Dense(units=6*self.rnn_dim, use_bias=True,
                                                       activation=tf.nn.selu, kernel_initializer=self.initializer,
                                                       name="projection_layer_1_dense",
                                                       activity_regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg))
             self.projection_output_1 = self.projection_layer_1.apply(activated_bn_inputs)
         with tf.variable_scope("final_projection_layer", reuse=tf.AUTO_REUSE):
             bn_projection_output_1 = tf.layers.batch_normalization(self.projection_output_1)
-            self.projection_layer_final = tf.layers.Dense(units=output_dim, use_bias=False, kernel_initializer=self.initializer,
+            self.projection_layer_final = tf.layers.Dense(units=output_dim, use_bias=True, kernel_initializer=self.initializer,
                                                 name="final_projection_layer_dense",
                                                 activity_regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg))
             logits = self.projection_layer_final.apply(bn_projection_output_1)
@@ -173,8 +179,8 @@ class BaseModel(object):
 
 class TrainModel(BaseModel):
     def __init__(self, iterator, flags, global_step):
-        chars, labels = iterator.get_next()
-        super(TrainModel, self).__init__(chars, flags, flags.dropout)
+        chars, grams2, grams3, labels = iterator.get_next()
+        super(TrainModel, self).__init__(chars, grams2, grams3, flags, flags.dropout)
         self.lr = flags.lr
         self.clip = flags.clip
         self.is_sync = flags.is_sync
@@ -211,6 +217,12 @@ class TrainModel(BaseModel):
                 if 'char_embedding_lookup_table' in v.name:
                     gradients = tf.sqrt(tf.reduce_mean(g.values ** 2))
                     self.train_summary.append(tf.summary.scalar("char_embedding_matrix_grad_norm", gradients))
+                elif 'gram2_embedding_lookup_table' in v.name:
+                    gradients = tf.sqrt(tf.reduce_mean(g.values ** 2))
+                    self.train_summary.append(tf.summary.scalar("gram2_embedding_matrix_grad_norm", gradients))
+                elif 'gram3_embedding_lookup_table' in v.name:
+                    gradients = tf.sqrt(tf.reduce_mean(g.values ** 2))
+                    self.train_summary.append(tf.summary.scalar("gram3_embedding_matrix_grad_norm", gradients))
                 elif 'projection_layer_1_dense' in v.name:
                     if "kernel" in v.name:
                         gradients = tf.sqrt(tf.reduce_mean(g ** 2))
@@ -219,14 +231,22 @@ class TrainModel(BaseModel):
                         gradients = tf.norm(g)
                         self.train_summary.append(tf.summary.scalar("projection_layer_1_b_grad_norm", gradients))
                 elif 'final_projection_layer_dense' in v.name:
-                    gradients = tf.sqrt(tf.reduce_mean(g ** 2))
-                    self.train_summary.append(tf.summary.scalar("projection_layer_final_W_grad_norm", gradients))
+                    if "kernel" in v.name:
+                        gradients = tf.sqrt(tf.reduce_mean(g ** 2))
+                        self.train_summary.append(tf.summary.scalar("projection_layer_final_W_grad_norm", gradients))
+                    elif "bias" in v.name:
+                        gradients = tf.norm(g)
+                        self.train_summary.append(tf.summary.scalar("projection_layer_final_b_grad_norm", gradients))
         # viszalize weight
         with tf.variable_scope("variable_hist"):
             self.train_summary.append(tf.summary.histogram("char_embedding_matrix_hist", tf.reshape(self.char_lookup, [-1])))
+            self.train_summary.append(tf.summary.histogram("gram2_embedding_matrix_hist", tf.reshape(self.gram2_lookup, [-1])))
+            self.train_summary.append(tf.summary.histogram("gram3_embedding_matrix_hist", tf.reshape(self.gram3_lookup, [-1])))
             self.train_summary.append(tf.summary.histogram("projection_layer_1_w_hist", tf.reshape(self.projection_layer_1.weights[0], [-1])))
             self.train_summary.append(tf.summary.histogram("projection_layer_1_b_hist", tf.reshape(self.projection_layer_1.weights[1], [-1])))
-            self.train_summary.append(tf.summary.histogram("projection_layer_final_w_hist", tf.reshape(self.projection_layer_final.weights, [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_final_w_hist", tf.reshape(self.projection_layer_final.weights[0], [-1])))
+            self.train_summary.append(tf.summary.histogram("projection_layer_final_b_hist", tf.reshape(self.projection_layer_final.weights[1], [-1])))
+
         # visualize rnn output
         with tf.variable_scope("sample_rnn_output_different_step"):
             self.train_summary.append(tf.summary.histogram("sample_1_rnn_output", tf.norm(self.rnn_output[0], axis=1)))
@@ -264,9 +284,9 @@ class TrainModel(BaseModel):
 class EvalModel(BaseModel):
     def __init__(self, iterator, flags):
         self._make_eval_summary()
-        chars, self.labels = iterator.get_next()
+        chars, grams2, grams3, self.labels = iterator.get_next()
 
-        super(EvalModel, self).__init__(chars, flags, 1.0)
+        super(EvalModel, self).__init__(chars, grams2, grams3, flags, 1.0)
         self.logits = self.build_graph()
 
         self.saver = tf.train.Saver(var_list=tf.global_variables(), sharded=True)

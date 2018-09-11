@@ -14,9 +14,9 @@ flags = tf.app.flags
 flags.DEFINE_boolean("is_sync", False, "Whether use sync strategy to update parameter")
 
 flags.DEFINE_float("lr", 0.001, "learning rate")
-flags.DEFINE_boolean("use_attention", True, "Whether to use attention mechanism")
+flags.DEFINE_boolean("use_attention", False, "Whether to use attention mechanism")
 flags.DEFINE_float("l2_reg", 0.001, "l2 regularization value")
-flags.DEFINE_float("clip", 5.0, "gradient clipper value")
+flags.DEFINE_float("clip", 1.0, "gradient clipper value")
 flags.DEFINE_integer("max_epoch", 1000, "the max number of epochs")
 flags.DEFINE_integer("batch_size", 2, "batch size")
 flags.DEFINE_integer("check_step", 10, "Check loss every N steps")
@@ -36,6 +36,8 @@ flags.DEFINE_float("dropout", 0.5, "dropout rate during training")
 
 flags.DEFINE_integer("worker_num", 0, "worker num to decide during trainer initialization")
 flags.DEFINE_integer("char_num", 0, "char num to decide during trainer initialization")
+flags.DEFINE_integer("gram2_num", 0, "gram2 num to decide during trainer initialization")
+flags.DEFINE_integer("gram3_num", 0, "gram3 num to decide during trainer initialization")
 flags.DEFINE_integer("label_num", 0, "label num to decide during trainer initialization")
 
 FLAGS = flags.FLAGS
@@ -121,6 +123,8 @@ class Trainer(object):
             DatasetMaker.load_mapping(self.map_file)
             DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
         FLAGS.char_num = len(DatasetMaker.char_to_id)
+        #FLAGS.gram2_num = len(DatasetMaker.gram2_to_id)
+        #FLAGS.gram3_num = len(DatasetMaker.gram3_to_id)
         FLAGS.label_num = len(DatasetMaker.label_to_id)
 
     @staticmethod
@@ -164,11 +168,15 @@ class Trainer(object):
         with train_session.graph.as_default():
             train_session.run(tf.global_variables_initializer())
         train_session.run(train_char_mapping_tensor.init)
+        #train_session.run(train_gram2_mapping_tensor.init)
+        #train_session.run(train_gram3_mapping_tensor.init)
         train_session.run(train_label_mapping_tensor.init)
         train_session.run(train_init_op)
 
         eval_session = self._create_session(eval_graph)
         eval_session.run(eval_char_mapping_tensor.init)
+        #eval_session.run(eval_gram2_mapping_tensor.init)
+        #eval_session.run(eval_gram3_mapping_tensor.init)
         eval_session.run(eval_label_mapping_tensor.init)
 
         tf.logging.info("Start training")

@@ -57,12 +57,15 @@ class BaseModel(object):
         self.rnn_output = self._build_multilayer_rnn(input_embedding, self.rnn_type, self.rnn_dim, self.rnn_layer, self.char_len)
         # concat final step output of biRNN
         final_rnn_output = self._pick_last_output(self.rnn_output)
+        # text cnn output
+        final_cnn_output = self._build_text_cnn(input_embedding, [2,3,4,5,10])
+        rnn_cnn_output = tf.concat([final_rnn_output, final_cnn_output], axis=-1)
         if self.use_attention:
             h_att = self._apply_attention(self.rnn_output, self.char_len, final_rnn_output)
             logits = self._build_projection_layer(h_att, self.label_num)
         else:
             # projection
-            logits = self._build_projection_layer(final_rnn_output, self.label_num)
+            logits = self._build_projection_layer(rnn_cnn_output, self.label_num)
         return logits
 
     def _apply_attention(self, hiddens, length, h_n):
@@ -103,8 +106,25 @@ class BaseModel(object):
 
     def _build_embedding_layer(self, inputs):
         with tf.variable_scope("char_embedding", reuse=tf.AUTO_REUSE), tf.device('/cpu:0'):
-            self.char_lookup = tf.get_variable(name="char_embedding_lookup_table", shape=[self.char_num, self.char_dim])
+            self.char_lookup = tf.get_variable(name="char_embedding_lookup_table", shape=[self.char_num, self.char_dim], initializer=self.initializer)
         return tf.nn.dropout(tf.nn.embedding_lookup(self.char_lookup, inputs), keep_prob=self.dropout)
+
+    def _build_text_cnn(self, inputs, filters_size):
+        pooled_outputs = []
+        for i, filter_size in enumerate(filters_size):
+            with tf.variable_scope("conv_maxpool_%s" % filter_size):
+                filter_shape = [filter_size, self.char_dim, 1, 200]
+                W = tf.get_variable(name="conv_W", shape=filter_shape, initializer=self.initializer)
+                b = tf.get_variable(shape=[200], name="conv_b")
+
+                conv = tf.nn.conv2d(input=tf.expand_dims(inputs, -1), filter=W, strides=[1,1,1,1], padding="VALID", name="conv_layer")
+                a = tf.nn.selu(tf.nn.bias_add(conv, b), name="conv_activations")
+                max_pooling = tf.nn.max_pool(value=a, ksize=[1, 200 - filter_size + 1, 1, 1], strides=[1,1,1,1], padding="VALID", name="max_pooling")
+                pooled_outputs.append(max_pooling)
+        total_filters = 200 * len(filters_size)
+        total_pool = tf.concat(pooled_outputs, 3)
+        flattend_pool = tf.reshape(total_pool, (-1, total_filters))
+        return flattend_pool
 
     def _create_rnn_cell(self, rnn_type, rnn_dim, rnn_layer):
         def _single_rnn_cell():

@@ -40,6 +40,8 @@ flags.DEFINE_float("dropout", 0.5, "dropout rate during training")
 
 flags.DEFINE_integer("worker_num", 0, "worker num to decide during trainer initialization")
 flags.DEFINE_integer("char_num", 0, "char num to decide during trainer initialization")
+flags.DEFINE_integer("gram2_num", 0, "gram2 num to decide during trainer initialization")
+flags.DEFINE_integer("gram3_num", 0, "gram3 num to decide during trainer initialization")
 flags.DEFINE_integer("label_num", 0, "label num to decide during trainer initialization")
 
 FLAGS = flags.FLAGS
@@ -102,6 +104,8 @@ class Trainer(object):
             if self.is_chief:
                 DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
         FLAGS.char_num = len(DatasetMaker.char_to_id)
+        #FLAGS.gram2_num = len(DatasetMaker.gram2_to_id)
+        #FLAGS.gram3_num = len(DatasetMaker.gram3_to_id)
         FLAGS.label_num = len(DatasetMaker.label_to_id)
 
     def _create_session(self):
@@ -169,14 +173,14 @@ class Trainer(object):
         if not self.is_chief:
             time.sleep(20)
         self._init_dataset_maker(True)
-
-        with tf.device(tf.train.replica_device_setter(worker_device=self.worker_prefix, cluster=self.cluster)):
+        ps_strategy = tf.contrib.training.GreedyLoadBalancingStrategy(self.num_ps)
+        with tf.device(tf.train.replica_device_setter(worker_device=self.worker_prefix, cluster=self.cluster, ps_strategy=ps_strategy)):
             self.global_step = tf.train.get_or_create_global_step()
             char_mapping_tensor, label_mapping_tensor = DatasetMaker.make_mapping_table_tensor()
 
             train_dataset = DatasetMaker.make_dataset(char_mapping_tensor, label_mapping_tensor, self.train_data,
-                                                      FLAGS.batch_size, "train", 1, 0)
-            tf.logging.info("The part {}/{} Training dataset is prepared!".format(1, 1))
+                                                      FLAGS.batch_size, "train", self.num_worker, self.task_index)
+            tf.logging.info("The part {}/{} Training dataset is prepared!".format(self.task_index+1, self.num_worker))
             train_iter = tf.data.Iterator.from_structure(train_dataset.output_types, train_dataset.output_shapes)
             self.train_init_op = train_iter.make_initializer(train_dataset)
 

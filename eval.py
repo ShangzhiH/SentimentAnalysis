@@ -5,10 +5,10 @@ import logging
 
 import tensorflow as tf
 
-from model_dataset import DatasetMaker
+from model_dataset_ngram import DatasetMaker
 from data_utils import line_num_count
 from utils import load_flags, print_flags
-from model import EvalModel
+from model_ngram import EvalModel
 
 flags = tf.app.flags
 flags.DEFINE_string("root_path", "", "project root path")
@@ -93,8 +93,10 @@ class Eval(object):
 
     def _init_dataset_maker(self):
         DatasetMaker.load_mapping(self.map_file)
-        DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
+        # DatasetMaker.save_mapping(self.map_file, self.vocabulary_file)
         FLAGS.char_num = len(DatasetMaker.char_to_id)
+        #FLAGS.gram2_num = len(DatasetMaker.gram2_to_id)
+        #FLAGS.gram3_num = len(DatasetMaker.gram3_to_id)
         FLAGS.label_num = len(DatasetMaker.label_to_id)
 
     @staticmethod
